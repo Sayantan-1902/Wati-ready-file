@@ -1,0 +1,2064 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Broadcast console — WATI import builder</title>
+
+<style>
+/* =====================================================================
+   DISPATCH CONSOLE — styling only. Nothing here affects the output file,
+   so every value below is safe to change.
+
+   The palette: cold steel surfaces, one amber accent. Amber is reserved
+   for three things only — the active step, live figures, and the byte
+   budget meters. Everything else stays quiet so those read instantly.
+   ===================================================================== */
+:root{
+  --bg:#0e141a;          /* page */
+  --panel:#161e27;       /* section panels */
+  --inset:#1b2430;       /* readouts, wells, table stripes */
+  --line:#26313d;
+  --line-strong:#34424f;
+  --ink:#e6edf3;
+  --ink-2:#94a5b4;
+  --ink-3:#657585;
+  --amber:#efa027;
+  --amber-dim:#b97615;
+  --amber-ink:#1a1105;   /* text sitting on amber */
+  --red:#f09595;
+  --red-bg:#2a1719;
+  --green:#5dcaa5;
+  --green-bg:#14251f;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:14.5px; line-height:1.55;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 90px}
+
+/* ---- Instrument bar: privacy notice + live readouts, always visible ---- */
+.rail{
+  position:sticky; top:0; z-index:60;
+  background:#0b1116; border-bottom:1px solid var(--line);
+}
+.rail-in{
+  max-width:1180px;margin:0 auto;padding:9px 24px;
+  display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;
+}
+.rail .privacy{font-size:12.5px;color:var(--ink-2);display:flex;align-items:center;gap:8px}
+.rail .privacy b{color:var(--green);font-weight:600}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:0 0 auto}
+.gauges{display:flex;gap:22px;align-items:baseline}
+.gauge{text-align:right}
+.gauge .g-v{font-family:var(--mono);font-size:15px;color:var(--ink);letter-spacing:-.02em;line-height:1.2}
+.gauge .g-k{font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+.gauge.lit .g-v{color:var(--amber)}
+.gauge.alarm .g-v{color:var(--red)}
+
+/* ---- Masthead ---- */
+.masthead{padding:34px 0 6px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.masthead h1{font-size:23px;font-weight:600;margin:0 0 5px;letter-spacing:-.015em}
+.masthead p{margin:0 0 22px;color:var(--ink-2);max-width:74ch;font-size:14px}
+
+/* ---- Section panels ---- */
+section.step{
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;
+  margin-top:18px;padding:0;
+}
+section.step[hidden]{display:none}
+.step-head{
+  display:flex;align-items:center;gap:12px;
+  padding:13px 20px;border-bottom:1px solid var(--line);background:#131b23;
+  border-radius:4px 4px 0 0;
+}
+.step-num{font-family:var(--mono);font-size:12px;color:var(--amber);letter-spacing:.06em}
+.step-head h2{font-size:15.5px;margin:0;font-weight:600;letter-spacing:-.005em}
+.step-head .step-note{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+.step-body{padding:20px}
+.step-sub{color:var(--ink-2);font-size:13px;margin:-6px 0 18px}
+
+/* ---- Drop target ---- */
+.drop{
+  border:1px dashed var(--line-strong);border-radius:4px;background:var(--inset);
+  padding:38px 20px;text-align:center;cursor:pointer;transition:border-color .12s,background .12s;
+}
+.drop:hover,.drop:focus-visible{border-color:var(--amber);background:#1e2833;outline:none}
+.drop.over{border-color:var(--amber);background:#22303c}
+.drop p{margin:0 0 5px;font-size:14.5px;color:var(--ink)}
+.drop span{color:var(--ink-3);font-size:12px;font-family:var(--mono)}
+
+/* ---- Form controls ---- */
+label.fl{display:block;font-size:12px;font-weight:600;margin:0 0 6px;color:var(--ink-2);letter-spacing:.02em}
+input[type=text],input[type=number],select{
+  width:100%;padding:8px 10px;font:inherit;font-size:13.5px;
+  background:#0e141a;border:1px solid var(--line-strong);border-radius:3px;color:var(--ink);
+}
+input[type=number],input#defaultCC,input#prefix{font-family:var(--mono)}
+input:focus,select:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 2px rgba(239,160,39,.18)}
+input::placeholder{color:var(--ink-3)}
+select{cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+.field{min-width:0}
+.hint{font-size:12px;color:var(--ink-3);margin:6px 0 0;line-height:1.45}
+.checkline{display:flex;align-items:flex-start;gap:10px;margin:16px 0 0;font-size:13.5px;color:var(--ink-2)}
+.checkline input{margin-top:3px;flex:0 0 auto;accent-color:var(--amber)}
+.checkline label{cursor:pointer}
+code{font-family:var(--mono);font-size:12.5px;background:var(--inset);padding:1px 5px;border-radius:2px;color:var(--amber)}
+
+button{
+  font:inherit;font-size:13.5px;font-weight:500;padding:8px 15px;border-radius:3px;
+  background:transparent;border:1px solid var(--line-strong);color:var(--ink);cursor:pointer;
+  transition:background .12s,border-color .12s;
+}
+button:hover{background:var(--inset);border-color:#42525f}
+button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+button.primary{background:var(--amber);border-color:var(--amber);color:var(--amber-ink);font-weight:600}
+button.primary:hover{background:#ffb23f;border-color:#ffb23f}
+button.icon{padding:4px 9px;font-size:12px;font-family:var(--mono)}
+button:disabled{opacity:.35;cursor:not-allowed}
+.btnrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:20px}
+
+/* ---- Messages ---- */
+.msg{border-radius:3px;padding:10px 13px;margin:16px 0 0;font-size:13px;border-left:2px solid}
+.msg.err{background:var(--red-bg);border-color:var(--red);color:#f7bcbc}
+.msg.warn{background:#2a2317;border-color:var(--amber);color:#f0d4a0}
+.msg.ok{background:var(--green-bg);border-color:var(--green);color:#a8e2ce}
+.msg[hidden]{display:none}
+
+/* ---- Parsed-file readout ---- */
+.filecard{
+  display:flex;flex-wrap:wrap;gap:6px 30px;align-items:baseline;
+  background:var(--inset);border-radius:3px;padding:12px 15px;margin-top:18px;font-size:13px;
+}
+.filecard b{color:var(--ink-3);font-weight:600;font-size:11.5px;letter-spacing:.03em}
+.filecard span span{font-family:var(--mono);color:var(--ink)}
+.headerlist{margin-top:12px;font-size:12px;color:var(--ink-3)}
+.chip{
+  display:inline-block;background:var(--inset);border:1px solid var(--line);border-radius:2px;
+  padding:2px 8px;margin:3px 5px 3px 0;font-size:11.5px;font-family:var(--mono);color:var(--ink-2);
+}
+
+/* ---- Attribute rows ---- */
+.attr-row{
+  display:grid;grid-template-columns:1.1fr .9fr 1.5fr auto;gap:12px;align-items:end;
+  padding:13px;border:1px solid var(--line);border-radius:3px;margin-bottom:9px;background:var(--inset);
+}
+.attr-actions{display:flex;gap:5px;align-items:center;padding-bottom:1px}
+.empty-attrs{color:var(--ink-3);font-size:13px;padding:14px 0;font-family:var(--mono)}
+.presetbar{
+  display:flex;flex-wrap:wrap;gap:12px;align-items:end;
+  padding:14px;background:var(--inset);border-radius:3px;margin-bottom:18px;
+}
+.presetbar .field{flex:1 1 190px}
+
+/* ---- Stats grid: the numbers are the point, so give them the mono face ---- */
+.stats{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.stat{background:var(--inset);padding:13px 14px;min-width:0}
+.stat .v{font-family:var(--mono);font-size:20px;font-weight:500;letter-spacing:-.03em;line-height:1.15;color:var(--ink)}
+.stat .k{font-size:11px;color:var(--ink-3);margin-top:3px;letter-spacing:.02em}
+.stat.good .v{color:var(--amber)}
+.stat.bad .v{color:var(--red)}
+
+/* ---- Preview table ---- */
+.tablewrap{margin-top:18px;border:1px solid var(--line);border-radius:3px;overflow:auto;max-height:430px}
+table{border-collapse:collapse;font-family:var(--mono);font-size:11.5px;white-space:nowrap;min-width:100%}
+th,td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:6px 11px;text-align:left}
+th{background:#131b23;position:sticky;top:0;font-weight:600;color:var(--ink-2);z-index:1;letter-spacing:.02em}
+td{color:var(--ink-2)}
+tbody tr:nth-child(odd) td{background:#19222c}
+th.attrcol{color:var(--amber)}
+td.attrcol{color:var(--ink)}
+
+/* ---- Output parts: the byte budget meter is the signature element ---- */
+.part{
+  display:flex;flex-wrap:wrap;gap:14px 20px;align-items:center;justify-content:space-between;
+  border:1px solid var(--line);border-radius:3px;padding:13px 15px;margin-bottom:8px;background:var(--inset);
+}
+.part .name{font-family:var(--mono);font-size:13px;color:var(--ink);font-weight:500}
+.part .meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-top:3px}
+.bar{height:6px;background:#0e141a;border-radius:1px;overflow:hidden;margin-top:9px;width:260px;max-width:100%}
+.bar i{display:block;height:100%;background:var(--amber-dim);border-right:1px solid var(--amber)}
+
+details.tool{
+  border:1px solid var(--line);border-radius:3px;background:var(--inset);margin-bottom:10px;
+}
+details.tool>summary{
+  padding:11px 14px;cursor:pointer;font-size:13.5px;color:var(--ink);list-style:none;
+  display:flex;align-items:center;gap:9px;user-select:none;
+}
+details.tool>summary::-webkit-details-marker{display:none}
+details.tool>summary::before{content:"+";font-family:var(--mono);color:var(--amber);font-size:14px}
+details.tool[open]>summary::before{content:"\2212"}
+details.tool>summary:hover{background:#1f2934}
+details.tool[open]>summary{border-bottom:1px solid var(--line)}
+.tool-body{padding:14px}
+textarea{
+  width:100%;min-height:130px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;line-height:1.6;
+  background:#0e141a;border:1px solid var(--line-strong);border-radius:3px;color:var(--ink);resize:vertical;
+}
+textarea:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 2px rgba(239,160,39,.18)}
+textarea::placeholder{color:var(--ink-3)}
+.syntax{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);line-height:1.9;margin:10px 0 0}
+.syntax b{color:var(--amber);font-weight:400}
+
+footer.note{margin-top:38px;color:var(--ink-3);font-size:12px;font-family:var(--mono);text-align:center}
+
+@media (max-width:820px){
+  .wrap,.rail-in{padding-left:14px;padding-right:14px}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .attr-row{grid-template-columns:1fr}
+  .gauges{gap:14px}
+  .rail .privacy{flex:1 1 100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- Instrument bar: privacy status on the left, live counters on the right.
+     It stays pinned so the byte budget is never off-screen. -->
+<div class="rail">
+  <div class="rail-in">
+    <div class="privacy">
+      <span class="dot" aria-hidden="true"></span>
+      <span><b>Local only</b> — no contact data leaves this device. No server, no account, no upload.</span>
+    </div>
+    <div class="gauges">
+      <div class="gauge"><div class="g-v" id="instRows">----</div><div class="g-k">read</div></div>
+      <div class="gauge lit"><div class="g-v" id="instValid">----</div><div class="g-k">valid</div></div>
+      <div class="gauge"><div class="g-v" id="instRej">----</div><div class="g-k">rejected</div></div>
+      <div class="gauge"><div class="g-v" id="instSize">0.00</div><div class="g-k">MB out</div></div>
+      <div class="gauge"><div class="g-v" id="instParts">--</div><div class="g-k">parts</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Broadcast console</h1>
+  <p>Raw contact list in, WATI-ready import files out. Numbers are cleaned, campaign attributes attached, and the output split under WATI's 2&nbsp;MB ceiling.</p>
+</header>
+
+<!-- ============================= STEP 1: UPLOAD ============================= -->
+<section class="step" id="sec1">
+  <div class="step-head">
+    <span class="step-num">01</span><h2>Load contact list</h2>
+    <span class="step-note">first sheet, first row as headers</span>
+  </div>
+  <div class="step-body">
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose or drop a contact file">
+      <p>Drop a file here, or click to choose one</p>
+      <span>.csv &nbsp; .xlsx &nbsp; .xls</span>
+    </div>
+    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,text/csv" hidden>
+
+    <div class="msg err" id="uploadErr" hidden></div>
+    <div class="msg warn" id="uploadWarn" hidden></div>
+
+    <div id="fileSummary" hidden>
+      <div class="filecard">
+        <span><b>FILE</b> <span id="fName"></span></span>
+        <span><b>SHEET</b> <span id="fSheet"></span></span>
+        <span><b>ROWS</b> <span id="fRows"></span></span>
+        <span><b>COLS</b> <span id="fCols"></span></span>
+      </div>
+      <div class="headerlist">Detected header row<br><span id="fHeaders"></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================= STEP 2: MAPPING ============================= -->
+<section class="step" id="sec2" hidden>
+  <div class="step-head">
+    <span class="step-num">02</span><h2>Map columns</h2>
+    <span class="step-note">best guesses pre-filled</span>
+  </div>
+  <div class="step-body">
+    <div class="grid">
+      <div class="field">
+        <label class="fl" for="mapPhone">Phone number column (required)</label>
+        <select id="mapPhone"></select>
+      </div>
+      <div class="field">
+        <label class="fl" for="mapCC">Country code column</label>
+        <select id="mapCC"></select>
+        <p class="hint">Choose “No country code column” to apply the default to every row.</p>
+      </div>
+      <div class="field">
+        <label class="fl" for="defaultCC">Default country code</label>
+        <input type="text" id="defaultCC" value="91" inputmode="numeric">
+        <p class="hint">Digits only, no “+”. Used when no column is chosen or a cell is blank.</p>
+      </div>
+      <div class="field">
+        <label class="fl" for="mapEmail">Email column</label>
+        <select id="mapEmail"></select>
+        <p class="hint">Trimmed and lowercased only — never reformatted.</p>
+      </div>
+      <div class="field">
+        <label class="fl" for="emailHeader">Email column header in the output</label>
+        <input type="text" id="emailHeader" value="emailid">
+        <p class="hint">Written straight after <code>AllowSMS</code>, before your other attributes.</p>
+      </div>
+      <div class="field">
+        <label class="fl" for="mapName">Name column</label>
+        <select id="mapName"></select>
+        <p class="hint">Optional. WATI accepts a blank Name.</p>
+      </div>
+    </div>
+
+    <div class="checkline">
+      <input type="checkbox" id="emailAsColumn" checked>
+      <label for="emailAsColumn">Write the email into the broadcast file as a per-row attribute column</label>
+    </div>
+    <div class="checkline">
+      <input type="checkbox" id="ccMerged">
+      <label for="ccMerged">The phone column already includes the country code (<code>919876543210</code> or <code>+91 98765 43210</code>). It will be split off.</label>
+    </div>
+    <div class="checkline">
+      <input type="checkbox" id="dedupe" checked>
+      <label for="dedupe">Remove duplicate numbers, keeping the first occurrence</label>
+    </div>
+
+    <div class="grid" style="margin-top:20px">
+      <div class="field">
+        <label class="fl" for="minDigits">Minimum total digits</label>
+        <input type="number" id="minDigits" value="8" min="4" max="20">
+      </div>
+      <div class="field">
+        <label class="fl" for="maxDigits">Maximum total digits</label>
+        <input type="number" id="maxDigits" value="15" min="4" max="25">
+        <p class="hint">Country code and national number counted together.</p>
+      </div>
+    </div>
+
+    <div class="msg err" id="mapErr" hidden></div>
+  </div>
+</section>
+
+<!-- ============================= STEP 3: ATTRIBUTES ============================= -->
+<section class="step" id="sec3" hidden>
+  <div class="step-head">
+    <span class="step-num">03</span><h2>Campaign attributes</h2>
+    <span class="step-note">extra columns WATI merges into the template</span>
+  </div>
+  <div class="step-body">
+    <p class="step-sub">Name each one exactly as it appears in your WATI template — <code>grlink</code>, <code>session</code>, <code>date1</code>.</p>
+
+    <div class="presetbar">
+      <div class="field">
+        <label class="fl" for="presetSelect">Saved sets</label>
+        <select id="presetSelect"><option value="">— none —</option></select>
+      </div>
+      <div class="field">
+        <label class="fl" for="presetName">Save current set as</label>
+        <input type="text" id="presetName" placeholder="Sept stock-market workshop">
+      </div>
+      <button type="button" id="presetSave">Save set</button>
+      <button type="button" id="presetDelete">Delete set</button>
+    </div>
+
+    <details class="tool" id="bulkTool">
+      <summary>Bulk add — paste names and values</summary>
+      <div class="tool-body">
+        <textarea id="bulkText" placeholder="grlink=https://link.be10x.in/grp&#10;calendar=https://link.be10x.in/Calendar-Invite-Call-of-4-Day-FFA&#10;session=Invite Call (Financial Freedom Accelerator)&#10;date1=10th September"></textarea>
+        <p class="syntax">
+          One per line as <b>name=value</b>, <b>name: value</b>, or name and value separated by a tab.<br>
+          Or paste two rows straight out of Excel — names on the first row, values on the second.<br>
+          Use <b>name=@Column</b> to pull the value from a column in your uploaded file, e.g. <b>emailid=@Email ID</b>.
+        </p>
+        <div class="btnrow" style="margin-top:14px">
+          <button type="button" class="primary" id="bulkAdd">Add these</button>
+          <button type="button" id="bulkReplace">Replace all with these</button>
+        </div>
+        <div class="msg err" id="bulkErr" hidden></div>
+        <div class="msg ok" id="bulkOk" hidden></div>
+      </div>
+    </details>
+
+    <details class="tool" id="importTool">
+      <summary>Copy attributes from a previous broadcast file</summary>
+      <div class="tool-body">
+        <p class="hint" style="margin:0 0 12px">
+          Load last campaign's WATI file. Every column after <code id="afterCol">AllowSMS</code> becomes an attribute,
+          with its value read back from the file. Columns whose value changes between rows are added empty
+          (or mapped to a matching column in your contact list) rather than being frozen to row one.
+        </p>
+        <input type="file" id="attrFileInput" accept=".csv,.xlsx,.xls,text/csv">
+        <div class="msg err" id="importErr" hidden></div>
+        <div class="msg warn" id="importWarn" hidden></div>
+        <div class="msg ok" id="importOk" hidden></div>
+      </div>
+    </details>
+
+    <div id="attrList"></div>
+    <div class="empty-attrs" id="attrEmpty">no attributes — files without them are still valid</div>
+
+    <div class="btnrow">
+      <button type="button" id="addAttr">Add attribute</button>
+      <button type="button" id="clearAttr">Clear all</button>
+      <button type="button" class="primary" id="buildBtn">Build broadcast file</button>
+    </div>
+    <div class="msg err" id="attrErr" hidden></div>
+  </div>
+</section>
+
+<!-- ============================= STEP 4: PREVIEW ============================= -->
+<section class="step" id="sec4" hidden>
+  <div class="step-head">
+    <span class="step-num">04</span><h2>Verify output</h2>
+    <span class="step-note">real headers, real values</span>
+  </div>
+  <div class="step-body">
+    <div class="stats" id="stats"></div>
+
+    <div class="msg err" id="buildErr" hidden></div>
+    <div class="msg warn" id="buildWarn" hidden></div>
+    <div class="msg ok" id="buildOk" hidden></div>
+
+    <div class="btnrow">
+      <button type="button" id="dlInvalid">Download rejected rows</button>
+    </div>
+
+    <div class="tablewrap"><table id="previewTable"><thead></thead><tbody></tbody></table></div>
+    <p class="hint">First 20 of <span id="previewTotal">0</span> rows.</p>
+  </div>
+</section>
+
+<!-- ============================= STEP 5: DOWNLOAD ============================= -->
+<section class="step" id="sec5" hidden>
+  <div class="step-head">
+    <span class="step-num">05</span><h2>Download parts</h2>
+    <span class="step-note">every part carries the full header row</span>
+  </div>
+  <div class="step-body">
+    <div class="grid">
+      <div class="field">
+        <label class="fl" for="maxMB">Max file size (MB)</label>
+        <input type="number" id="maxMB" value="1.9" min="0.05" max="20" step="0.05">
+        <p class="hint">WATI rejects anything over 2 MB. 1.9 leaves a safety margin.</p>
+      </div>
+      <div class="field">
+        <label class="fl" for="prefix">Filename prefix</label>
+        <input type="text" id="prefix" value="broadcast">
+        <p class="hint">Named <code>prefix_part_01_of_05.csv</code>.</p>
+      </div>
+    </div>
+
+    <div class="msg err" id="splitErr" hidden></div>
+
+    <div class="btnrow">
+      <button type="button" class="primary" id="dlZip">Download all as ZIP</button>
+      <span class="hint" style="margin:0">Individual buttons stay available — some browsers block multi-file downloads.</span>
+    </div>
+
+    <div id="partList" style="margin-top:18px"></div>
+  </div>
+</section>
+
+<footer class="note">wati broadcast console · offline-capable once the two libraries are vendored locally</footer>
+
+</div><!-- /wrap -->
+
+<!-- =====================================================================
+     EXTERNAL LIBRARIES — pinned versions with Subresource Integrity.
+     SheetJS reads .csv/.xlsx/.xls; JSZip builds the ZIP download.
+     Neither library sends data anywhere; both run entirely in the page.
+
+     ---------------------------------------------------------------------
+     HOW TO VENDOR THESE LOCALLY (for a fully offline, no-CDN build)
+     ---------------------------------------------------------------------
+     1. Create a folder called  lib  next to this index.html file.
+     2. Download these two files (in any browser, then move them into lib/):
+          https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js
+          https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js
+        Save them as:
+          lib/xlsx.full.min.js
+          lib/jszip.min.js
+     3. Replace the two script tags immediately below with exactly these:
+
+          <script src="lib/xlsx.full.min.js"></script>
+          <script src="lib/jszip.min.js"></script>
+
+        (Drop the integrity and crossorigin attributes — SRI only applies to
+        cross-origin files, and leaving it on a local file will block it.)
+     4. Commit the lib folder along with index.html. Done — the page then
+        makes zero network requests of any kind.
+     ===================================================================== -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+        integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
+        integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. WATI_SCHEMA — THE OUTPUT CONTRACT
+   ---------------------------------------------------------------------
+   Every fact below was read out of the attached WATI sample file
+   (Contacts_Upload_Sample_Campaign.csv), byte for byte:
+
+     Name,CountryCode,Phone,AllowCampaign,AllowSMS,Attribute 1,Attribute 2
+     WATI Test,852,64318721,TRUE,TRUE,value 1,value 2
+
+   - No byte-order mark. The file starts directly with "N" of "Name".
+   - Line ending is a bare LF (\n), not CRLF.
+   - No trailing newline after the last row.
+   - CountryCode is its OWN column, digits only, no "+" (852).
+   - Phone holds the national number ONLY, no country code, no leading 0.
+   - AllowCampaign / AllowSMS are the literal uppercase word TRUE.
+   - Attribute columns are free-form names appended after AllowSMS.
+
+   THIS IS THE ONLY BLOCK YOU SHOULD NEED TO EDIT if WATI changes its
+   template. Everything else in the script reads from here.
+   ===================================================================== */
+var WATI_SCHEMA = {
+
+  // --- File format -------------------------------------------------
+  fileExtension: "csv",   // the sample is a .csv
+  delimiter: ",",
+  lineEnding: "\n",       // sample uses LF only
+  writeBOM: false,        // sample has NO byte-order mark — do not add one
+  trailingNewline: false, // sample ends right after the last value
+
+  // --- Fixed columns, in the exact order the sample uses ------------
+  // Edit the text on the right if WATI renames a column.
+  columns: {
+    name:          "Name",
+    countryCode:   "CountryCode",
+    phone:         "Phone",
+    allowCampaign: "AllowBroadcast",
+    allowSMS:      "AllowSMS"
+  },
+
+  // Some WATI accounts export this column as "AllowBroadcast" instead of
+  // "AllowCampaign". Both spellings are offered in the UI; the sample file
+  // says AllowCampaign, so that is the default.
+  // The blank WATI template ships as "AllowCampaign", but real exported
+  // campaign files use "AllowBroadcast". The first entry is the default;
+  // swap the order here, or use the dropdown in step 2, to change it.
+  allowCampaignVariants: ["AllowBroadcast", "AllowCampaign"],
+
+  // --- Fixed values -------------------------------------------------
+  allowCampaignValue: "TRUE",
+  allowSMSValue: "TRUE",
+
+  // --- Number formatting rules --------------------------------------
+  countryCodeFormat: {
+    digitsOnly: true,     // strip +, spaces, brackets
+    includePlus: false,   // sample shows 852, not +852
+    stripLeadingZeros: true
+  },
+  phoneFormat: {
+    digitsOnly: true,
+    includeCountryCode: false, // country code lives in its own column
+    stripLeadingZeros: true    // 098765... becomes 98765...
+  },
+
+  // --- The email column ---------------------------------------------
+  // WATI treats email as an ordinary attribute column, not a built-in one.
+  // A real campaign file looks like:
+  //   Name,CountryCode,Phone,AllowBroadcast,AllowSMS,emailid,grlink,calendar
+  // so the email sits directly after AllowSMS, ahead of the fixed-value
+  // attributes. Change this default header if your template calls it
+  // something else (e.g. "email" or "Email ID").
+  emailColumnHeader: "emailid",
+
+  // --- Attribute (custom parameter) columns -------------------------
+  // Free-form header text, appended after AllowSMS in the order you add
+  // them. The sample uses the placeholders "Attribute 1"/"Attribute 2";
+  // a real campaign file uses names like grlink, session, date1, msg1.
+  attributeNaming: "free-form-header-after-AllowSMS",
+
+  // --- Validation defaults (also editable in the UI) -----------------
+  minTotalDigits: 8,
+  maxTotalDigits: 15
+};
+
+/* Safety margin below WATI's hard 2 MB import limit.
+   Editable on the page; this is only the starting value. */
+var MAX_FILE_BYTES = 1.9 * 1024 * 1024;
+
+/* localStorage keys. Only presets and UI settings are stored here —
+   NEVER contact data. */
+var LS_PRESETS = "watiBuilder.attributePresets.v1";
+var LS_SETTINGS = "watiBuilder.uiSettings.v1";
+
+var PREVIEW_ROWS = 20;
+
+/* =====================================================================
+   2. SMALL HELPERS
+   ===================================================================== */
+function $(id){ return document.getElementById(id); }
+
+function show(el){ el.hidden = false; }
+function hide(el){ el.hidden = true; }
+
+/** Put a message into one of the coloured message boxes. */
+function setMsg(el, text){
+  if(!text){ el.hidden = true; el.textContent = ""; return; }
+  el.textContent = text; el.hidden = false;
+}
+
+/** Human-readable byte size. */
+function fmtBytes(b){
+  if(b < 1024) return b + " B";
+  if(b < 1024*1024) return (b/1024).toFixed(1) + " KB";
+  return (b/(1024*1024)).toFixed(2) + " MB";
+}
+
+function fmtNum(n){ return n.toLocaleString("en-US"); }
+
+/** Escape a single CSV field per RFC 4180: quote only when necessary. */
+function csvField(v){
+  var s = (v === null || v === undefined) ? "" : String(v);
+  if(s.indexOf('"') !== -1 || s.indexOf(WATI_SCHEMA.delimiter) !== -1 ||
+     s.indexOf("\n") !== -1 || s.indexOf("\r") !== -1){
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+/** Turn an array of values into one CSV line (no line ending). */
+function csvLine(values){
+  var out = [];
+  for(var i=0;i<values.length;i++) out.push(csvField(values[i]));
+  return out.join(WATI_SCHEMA.delimiter);
+}
+
+/** Trigger a browser download for a Blob. Works over file:// too. */
+function downloadBlob(blob, filename){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+}
+
+/* =====================================================================
+   3. APPLICATION STATE
+   All of this lives in memory only and disappears when you close the tab.
+   ===================================================================== */
+var state = {
+  fileName: "",
+  sheetName: "",
+  headers: [],      // array of header strings, index = column index
+  rowsFmt: [],      // formatted cell values (good for dates/text)
+  rowsRaw: [],      // raw cell values (good for long numbers)
+  attributes: [],   // [{id, name, source:'fixed'|'column', value, column}]
+  built: null,      // result of buildOutput()
+  parts: []         // result of splitIntoParts()
+};
+var attrIdCounter = 1;
+
+/* =====================================================================
+   4. STEP 1 — READING THE UPLOADED FILE (SheetJS, entirely in-browser)
+   ===================================================================== */
+
+/** Verify both CDN libraries actually loaded before anything else. */
+function librariesReady(){
+  var missing = [];
+  if(typeof XLSX === "undefined") missing.push("SheetJS (xlsx)");
+  if(typeof JSZip === "undefined") missing.push("JSZip");
+  if(missing.length){
+    setMsg($("uploadErr"),
+      "Could not load " + missing.join(" and ") + ". You are probably offline, or a network " +
+      "filter is blocking jsdelivr.net. Follow the “HOW TO VENDOR THESE LOCALLY” comment " +
+      "near the bottom of index.html to bundle the libraries into a lib/ folder.");
+    return false;
+  }
+  return true;
+}
+
+/** Convert any SheetJS cell value into a plain string. */
+function cellToString(v){
+  if(v === null || v === undefined) return "";
+  if(v instanceof Date){
+    // yyyy-mm-dd, stable and unambiguous
+    var mm = String(v.getMonth()+1).padStart(2,"0");
+    var dd = String(v.getDate()).padStart(2,"0");
+    return v.getFullYear() + "-" + mm + "-" + dd;
+  }
+  if(typeof v === "number"){
+    // Avoid scientific notation for long phone numbers stored as numbers
+    return Number.isInteger(v) ? v.toFixed(0) : String(v);
+  }
+  return String(v);
+}
+
+/**
+ * Read one cell. preferRaw=true is used for phone/country-code columns so a
+ * number formatted as "7.4E+09" in the spreadsheet still yields the digits.
+ */
+function cellAt(rowIndex, colIndex, preferRaw){
+  if(colIndex === null || colIndex < 0) return "";
+  var rowR = state.rowsRaw[rowIndex] || [];
+  var rowF = state.rowsFmt[rowIndex] || [];
+  if(preferRaw){
+    var rv = rowR[colIndex];
+    if(rv !== undefined && rv !== null && rv !== "") return cellToString(rv);
+    return cellToString(rowF[colIndex]);
+  }
+  var fv = rowF[colIndex];
+  if(fv !== undefined && fv !== null && fv !== "") return cellToString(fv);
+  return cellToString(rowR[colIndex]);
+}
+
+/** Main file handler: parse, validate, then populate the mapping step. */
+function handleFile(file){
+  setMsg($("uploadErr"), ""); setMsg($("uploadWarn"), "");
+  hide($("fileSummary")); hide($("sec2")); hide($("sec3"));
+  hide($("sec4")); hide($("sec5"));
+  if(!librariesReady()) return;
+  if(!file) return;
+
+  var lower = file.name.toLowerCase();
+  if(!/\.(csv|xlsx|xls)$/.test(lower)){
+    setMsg($("uploadErr"), "That file type is not supported. Use a .csv, .xlsx or .xls file.");
+    return;
+  }
+  if(file.size === 0){
+    setMsg($("uploadErr"), "That file is empty (0 bytes). Export it again and retry.");
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onerror = function(){
+    setMsg($("uploadErr"), "The file could not be read from disk. Check it is not open in Excel and try again.");
+  };
+  reader.onload = function(e){
+    var wb;
+    try{
+      wb = XLSX.read(new Uint8Array(e.target.result), {
+        type: "array", cellDates: true, codepage: 65001
+      });
+    }catch(err){
+      setMsg($("uploadErr"), "This file could not be parsed as a spreadsheet. " +
+        "If it came from another tool, open it in Excel or Sheets and re-save as .csv or .xlsx. " +
+        "(Technical detail: " + err.message + ")");
+      return;
+    }
+
+    if(!wb.SheetNames || wb.SheetNames.length === 0){
+      setMsg($("uploadErr"), "This workbook contains no sheets.");
+      return;
+    }
+    var sheetName = wb.SheetNames[0];
+    var ws = wb.Sheets[sheetName];
+    if(!ws){
+      setMsg($("uploadErr"), "The first sheet (" + sheetName + ") could not be opened.");
+      return;
+    }
+
+    // Two passes: formatted values, and raw values.
+    var fmt, raw;
+    try{
+      fmt = XLSX.utils.sheet_to_json(ws, {header:1, defval:"", raw:false, cellDates:true, dateNF:"yyyy-mm-dd", blankrows:false});
+      raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:"", raw:true, blankrows:false});
+    }catch(err){
+      setMsg($("uploadErr"), "The sheet could not be converted into rows. (Technical detail: " + err.message + ")");
+      return;
+    }
+
+    if(!fmt.length){
+      setMsg($("uploadErr"), "There is no data in the first sheet of this file.");
+      return;
+    }
+
+    // Row 0 is the header row.
+    var rawHeaders = fmt[0].map(cellToString);
+    var headers = [];
+    for(var c=0;c<rawHeaders.length;c++){
+      var h = rawHeaders[c].trim();
+      headers.push(h === "" ? ("Column " + (c+1)) : h);
+    }
+    if(headers.length === 0){
+      setMsg($("uploadErr"), "No header row was found in the first row of the sheet.");
+      return;
+    }
+
+    var bodyFmt = fmt.slice(1);
+    var bodyRaw = raw.slice(1);
+
+    // Drop rows that are completely blank across every column.
+    var keptF = [], keptR = [];
+    for(var i=0;i<bodyFmt.length;i++){
+      var r = bodyFmt[i] || [];
+      var any = false;
+      for(var j=0;j<r.length;j++){
+        if(cellToString(r[j]).trim() !== ""){ any = true; break; }
+      }
+      if(any){ keptF.push(r); keptR.push(bodyRaw[i] || []); }
+    }
+
+    if(keptF.length === 0){
+      setMsg($("uploadErr"), "This file has a header row but no data rows underneath it.");
+      return;
+    }
+
+    state.fileName = file.name;
+    state.sheetName = sheetName;
+    state.headers = headers;
+    state.rowsFmt = keptF;
+    state.rowsRaw = keptR;
+    state.built = null;
+    state.parts = [];
+
+    // Show the summary
+    $("fName").textContent = file.name + " (" + fmtBytes(file.size) + ")";
+    $("fSheet").textContent = sheetName;
+    $("fRows").textContent = fmtNum(keptF.length);
+    $("fCols").textContent = headers.length;
+    $("fHeaders").innerHTML = headers.map(function(h){
+      return '<span class="chip"></span>';
+    }).join("");
+    // Set chip text via textContent so odd header characters cannot inject HTML
+    $("afterCol").textContent = WATI_SCHEMA.columns.allowSMS;
+    var chips = $("fHeaders").querySelectorAll(".chip");
+    for(var k=0;k<chips.length;k++) chips[k].textContent = headers[k];
+    show($("fileSummary"));
+    updateInstruments(null, null, 0);
+
+    if(wb.SheetNames.length > 1){
+      setMsg($("uploadWarn"), "This workbook has " + wb.SheetNames.length +
+        " sheets. Only the first one (" + sheetName + ") was read.");
+    }
+
+    // Move on
+    buildMappingDropdowns();
+    show($("sec2"));
+    show($("sec3"));
+    renderAttributes();
+    $("prefix").value = derivePrefix(file.name);
+    $("sec2").scrollIntoView({behavior:"smooth", block:"start"});
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/** Suggest a filename prefix from the uploaded filename. */
+function derivePrefix(name){
+  var base = name.replace(/\.[^.]+$/, "");
+  base = base.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/_+/g,"_").replace(/^_|_$/g,"");
+  return base ? base.slice(0,60) : "broadcast";
+}
+
+/* =====================================================================
+   5. STEP 2 — FUZZY COLUMN DETECTION AND MAPPING
+   ---------------------------------------------------------------------
+   Keyword lists are safe to extend if your exports use other header names.
+   ===================================================================== */
+var DETECT = {
+  countryCode: ["country code","countrycode","country_code","country-code","cc","dialcode","dial code","isd","country","code","prefix","std"],
+  phone:       ["phone","mobile","number","whatsapp","whats app","wa","contact","msisdn","cell","telephone","tel","phone number","mobile number"],
+  email:       ["email","e-mail","mail","email id","emailid","email address","e mail"],
+  name:        ["name","full name","fullname","first name","firstname","customer name","contact name","student name"]
+};
+
+/** Lowercase and squeeze a header for comparison. */
+function norm(s){ return String(s).toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+
+/**
+ * Score how well a header matches a keyword list.
+ * Exact match scores highest, then whole-word containment, then substring.
+ */
+function scoreHeader(header, keywords){
+  var h = norm(header);
+  if(!h) return 0;
+  var best = 0;
+  for(var i=0;i<keywords.length;i++){
+    var k = keywords[i];
+    var s = 0;
+    if(h === k) s = 100;
+    else if(new RegExp("(^| )" + k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&") + "( |$)").test(h)) s = 70;
+    else if(h.indexOf(k) !== -1) s = 45;
+    else if(k.indexOf(h) !== -1 && h.length >= 2) s = 30;
+    // Longer keyword matches are more specific, nudge them up
+    if(s > 0) s += Math.min(k.length, 12) * 0.4;
+    if(s > best) best = s;
+  }
+  return best;
+}
+
+/** Return the index of the best-matching column, or -1. */
+function bestColumn(keywords, exclude){
+  var bestIdx = -1, bestScore = 0;
+  for(var i=0;i<state.headers.length;i++){
+    if(exclude && exclude.indexOf(i) !== -1) continue;
+    var s = scoreHeader(state.headers[i], keywords);
+    if(s > bestScore){ bestScore = s; bestIdx = i; }
+  }
+  return bestScore >= 30 ? bestIdx : -1;
+}
+
+/** Fill a <select> with the uploaded file's columns. */
+function fillColumnSelect(sel, noneLabel, selectedIdx){
+  sel.innerHTML = "";
+  var o = document.createElement("option");
+  o.value = "-1"; o.textContent = noneLabel;
+  sel.appendChild(o);
+  for(var i=0;i<state.headers.length;i++){
+    var opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = (i+1) + ". " + state.headers[i];
+    sel.appendChild(opt);
+  }
+  sel.value = String(selectedIdx === undefined ? -1 : selectedIdx);
+}
+
+/** Build all five mapping dropdowns with auto-detected guesses. */
+function buildMappingDropdowns(){
+  var phoneIdx = bestColumn(DETECT.phone, []);
+  var ccIdx    = bestColumn(DETECT.countryCode, phoneIdx >= 0 ? [phoneIdx] : []);
+  var emailIdx = bestColumn(DETECT.email, [phoneIdx, ccIdx].filter(function(x){return x>=0;}));
+  var nameIdx  = bestColumn(DETECT.name, [phoneIdx, ccIdx, emailIdx].filter(function(x){return x>=0;}));
+
+  fillColumnSelect($("mapPhone"), "— choose a column —", phoneIdx);
+  fillColumnSelect($("mapCC"),    "No country code column — use the default below", ccIdx);
+  fillColumnSelect($("mapEmail"), "— none —", emailIdx);
+  // If an email column was found, default to including it in the output —
+  // that is what a real WATI campaign file does.
+  $("emailAsColumn").checked = (emailIdx >= 0);
+  fillColumnSelect($("mapName"),  "— none, leave Name blank —", nameIdx);
+
+  // If there is no separate country code column, the code is very likely
+  // baked into the phone column already. Pre-tick that box.
+  $("ccMerged").checked = (ccIdx === -1);
+
+  // Restore remembered UI settings (not contact data).
+  var s = loadSettings();
+  if(s.defaultCC) $("defaultCC").value = s.defaultCC;
+  if(s.minDigits) $("minDigits").value = s.minDigits;
+  if(s.maxDigits) $("maxDigits").value = s.maxDigits;
+  if(s.maxMB) $("maxMB").value = s.maxMB;
+  if(s.emailHeader) $("emailHeader").value = s.emailHeader;
+  if(typeof s.allowHeader === "string" && s.allowHeader){
+    WATI_SCHEMA.columns.allowCampaign = s.allowHeader;
+  }
+}
+
+/* =====================================================================
+   6. STEP 3 — ATTRIBUTE BUILDER + PRESETS
+   ===================================================================== */
+
+function addAttribute(data){
+  state.attributes.push({
+    id: attrIdCounter++,
+    name: data && data.name ? data.name : "",
+    source: data && data.source === "column" ? "column" : "fixed",
+    value: data && data.value ? data.value : "",
+    column: data && typeof data.column === "number" ? data.column : -1
+  });
+  renderAttributes();
+}
+
+function removeAttribute(id){
+  state.attributes = state.attributes.filter(function(a){ return a.id !== id; });
+  renderAttributes();
+}
+
+function moveAttribute(id, delta){
+  var i = state.attributes.findIndex(function(a){ return a.id === id; });
+  var j = i + delta;
+  if(i < 0 || j < 0 || j >= state.attributes.length) return;
+  var tmp = state.attributes[i];
+  state.attributes[i] = state.attributes[j];
+  state.attributes[j] = tmp;
+  renderAttributes();
+}
+
+/** Redraw the whole attribute list from state.attributes. */
+function renderAttributes(){
+  var list = $("attrList");
+  list.innerHTML = "";
+  $("attrEmpty").style.display = state.attributes.length ? "none" : "block";
+
+  state.attributes.forEach(function(attr, index){
+    var row = document.createElement("div");
+    row.className = "attr-row";
+
+    // --- name -------------------------------------------------------
+    var f1 = document.createElement("div"); f1.className = "field";
+    var l1 = document.createElement("label"); l1.className = "fl";
+    l1.textContent = "Attribute name"; l1.htmlFor = "an" + attr.id;
+    var i1 = document.createElement("input");
+    i1.type = "text"; i1.id = "an" + attr.id; i1.value = attr.name;
+    i1.placeholder = "e.g. session";
+    i1.addEventListener("input", function(){ attr.name = i1.value; });
+    f1.appendChild(l1); f1.appendChild(i1);
+
+    // --- source -----------------------------------------------------
+    var f2 = document.createElement("div"); f2.className = "field";
+    var l2 = document.createElement("label"); l2.className = "fl";
+    l2.textContent = "Value source"; l2.htmlFor = "as" + attr.id;
+    var s2 = document.createElement("select"); s2.id = "as" + attr.id;
+    var oFixed = document.createElement("option");
+    oFixed.value = "fixed"; oFixed.textContent = "Fixed value for all rows";
+    var oCol = document.createElement("option");
+    oCol.value = "column"; oCol.textContent = "Map from uploaded column";
+    s2.appendChild(oFixed); s2.appendChild(oCol);
+    s2.value = attr.source;
+    f2.appendChild(l2); f2.appendChild(s2);
+
+    // --- value ------------------------------------------------------
+    var f3 = document.createElement("div"); f3.className = "field";
+    var l3 = document.createElement("label"); l3.className = "fl";
+    l3.textContent = "Value"; l3.htmlFor = "av" + attr.id;
+    f3.appendChild(l3);
+    var valueHost = document.createElement("div");
+    f3.appendChild(valueHost);
+
+    function drawValue(){
+      valueHost.innerHTML = "";
+      if(attr.source === "fixed"){
+        var i3 = document.createElement("input");
+        i3.type = "text"; i3.id = "av" + attr.id; i3.value = attr.value;
+        i3.placeholder = "e.g. 10th September, 7 PM";
+        i3.addEventListener("input", function(){ attr.value = i3.value; });
+        valueHost.appendChild(i3);
+      }else{
+        var s3 = document.createElement("select"); s3.id = "av" + attr.id;
+        var none = document.createElement("option");
+        none.value = "-1"; none.textContent = "— choose a column —";
+        s3.appendChild(none);
+        for(var i=0;i<state.headers.length;i++){
+          var o = document.createElement("option");
+          o.value = String(i); o.textContent = (i+1) + ". " + state.headers[i];
+          s3.appendChild(o);
+        }
+        s3.value = String(attr.column);
+        s3.addEventListener("change", function(){ attr.column = parseInt(s3.value,10); });
+        valueHost.appendChild(s3);
+      }
+    }
+    drawValue();
+    s2.addEventListener("change", function(){ attr.source = s2.value; drawValue(); });
+
+    // --- actions ----------------------------------------------------
+    var f4 = document.createElement("div"); f4.className = "attr-actions";
+    var up = document.createElement("button");
+    up.type="button"; up.className="icon"; up.textContent="↑";
+    up.title = "Move up"; up.setAttribute("aria-label","Move " + (attr.name||"attribute") + " up");
+    up.disabled = (index === 0);
+    up.addEventListener("click", function(){ moveAttribute(attr.id, -1); });
+
+    var down = document.createElement("button");
+    down.type="button"; down.className="icon"; down.textContent="↓";
+    down.title = "Move down"; down.setAttribute("aria-label","Move " + (attr.name||"attribute") + " down");
+    down.disabled = (index === state.attributes.length - 1);
+    down.addEventListener("click", function(){ moveAttribute(attr.id, 1); });
+
+    var del = document.createElement("button");
+    del.type="button"; del.className="icon"; del.textContent="Remove";
+    del.addEventListener("click", function(){ removeAttribute(attr.id); });
+
+    f4.appendChild(up); f4.appendChild(down); f4.appendChild(del);
+
+    row.appendChild(f1); row.appendChild(f2); row.appendChild(f3); row.appendChild(f4);
+    list.appendChild(row);
+  });
+}
+
+/* ---------------------------------------------------------------------
+   BULK ENTRY — paste many attributes at once instead of one at a time.
+   --------------------------------------------------------------------- */
+
+/** Strip a single pair of wrapping quotes, as Excel sometimes adds. */
+function unquote(s){
+  s = s.trim();
+  if(s.length >= 2 && ((s[0] === '"' && s[s.length-1] === '"') ||
+                       (s[0] === "'" && s[s.length-1] === "'"))){
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+/**
+ * Find where the name ends and the value begins. The earliest of tab, "=",
+ * ":" or "," wins, which keeps URLs intact — in "grlink=https://a?b=c" the
+ * "=" at position 6 beats the ":" inside the URL.
+ */
+function splitPair(line){
+  var seps = ["\t", "=", ":", ","];
+  var at = -1;
+  for(var i=0;i<seps.length;i++){
+    var idx = line.indexOf(seps[i]);
+    if(idx > 0 && (at === -1 || idx < at)) at = idx;
+  }
+  if(at === -1) return null;
+  return [line.slice(0, at), line.slice(at + 1)];
+}
+
+/** Case-insensitive lookup of an uploaded column by header name. */
+function findColumnByName(name){
+  var want = String(name).trim().toLowerCase();
+  for(var i=0;i<state.headers.length;i++){
+    if(String(state.headers[i]).trim().toLowerCase() === want) return i;
+  }
+  return -1;
+}
+
+/**
+ * Turn pasted text into attribute definitions.
+ * Returns {items:[...]} or {error:"..."}.
+ */
+function parseBulkAttributes(text){
+  var lines = String(text).replace(/\r\n?/g, "\n").split("\n")
+              .filter(function(l){ return l.trim() !== ""; });
+  if(lines.length === 0) return {error: "Nothing to add — the box is empty."};
+
+  var pairs = [];
+
+  // Two rows copied sideways out of Excel: names on row 1, values on row 2.
+  if(lines.length === 2 && lines[0].indexOf("\t") !== -1){
+    var names = lines[0].split("\t"), vals = lines[1].split("\t");
+    if(names.length !== vals.length){
+      return {error: "The two pasted rows do not line up — " + names.length +
+                     " names but " + vals.length + " values."};
+    }
+    for(var i=0;i<names.length;i++){
+      if(unquote(names[i]) !== "") pairs.push([names[i], vals[i]]);
+    }
+  }else{
+    for(var j=0;j<lines.length;j++){
+      var trimmed = lines[j].trim();
+      if("\t=:,".indexOf(trimmed.charAt(0)) !== -1){
+        return {error: "Line " + (j+1) + " starts with a separator, so it has no attribute name: " +
+                       trimmed.slice(0,60)};
+      }
+      var pair = splitPair(lines[j]);
+      if(!pair){
+        return {error: "Line " + (j+1) + " has no separator between the name and the value: " +
+                       lines[j].trim().slice(0,60)};
+      }
+      pairs.push(pair);
+    }
+  }
+
+  var items = [], seen = {}, missingCols = [];
+  for(var k=0;k<pairs.length;k++){
+    var nm = unquote(pairs[k][0]);
+    var val = unquote(pairs[k][1]);
+    if(nm === "") return {error: "Line " + (k+1) + " has an empty attribute name."};
+    if(seen[nm]) return {error: "\u201c" + nm + "\u201d appears twice in the pasted text."};
+    seen[nm] = true;
+
+    if(val.charAt(0) === "@"){
+      var colName = val.slice(1).trim();
+      var colIdx = findColumnByName(colName);
+      if(colIdx === -1){ missingCols.push(colName); }
+      items.push({name: nm, source: "column", value: "", column: colIdx});
+    }else{
+      items.push({name: nm, source: "fixed", value: val, column: -1});
+    }
+  }
+
+  if(missingCols.length){
+    return {error: "No column named " + missingCols.map(function(c){ return "\u201c" + c + "\u201d"; }).join(" or ") +
+                   " in your uploaded file. Available columns: " + state.headers.join(", ")};
+  }
+  return {items: items};
+}
+
+/** Apply pasted attributes, either appended or replacing what is there. */
+function applyBulk(replace){
+  setMsg($("bulkErr"), ""); setMsg($("bulkOk"), "");
+  var res = parseBulkAttributes($("bulkText").value);
+  if(res.error){ setMsg($("bulkErr"), res.error); return; }
+
+  if(replace) state.attributes = [];
+
+  var added = 0, updated = 0;
+  res.items.forEach(function(it){
+    var existing = state.attributes.filter(function(a){ return a.name === it.name; })[0];
+    if(existing){
+      existing.source = it.source; existing.value = it.value; existing.column = it.column;
+      updated++;
+    }else{
+      addAttribute(it); added++;
+    }
+  });
+  renderAttributes();
+  setMsg($("bulkOk"), added + (added === 1 ? " attribute added" : " attributes added") +
+    (updated ? ", " + updated + " updated" : "") + ".");
+}
+
+/* ---------------------------------------------------------------------
+   IMPORT — read the attribute layout back out of a previous WATI file.
+   --------------------------------------------------------------------- */
+
+/**
+ * Read a past broadcast file and rebuild its attribute set. Everything after
+ * the AllowSMS column is an attribute. Values are only treated as fixed when
+ * they are genuinely the same on every row that gets sampled.
+ */
+function importAttributesFromFile(file){
+  setMsg($("importErr"), ""); setMsg($("importWarn"), ""); setMsg($("importOk"), "");
+  if(!file) return;
+  if(typeof XLSX === "undefined"){
+    setMsg($("importErr"), "SheetJS did not load, so files cannot be read right now.");
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onerror = function(){ setMsg($("importErr"), "That file could not be read from disk."); };
+  reader.onload = function(e){
+    var rows;
+    try{
+      var wb = XLSX.read(new Uint8Array(e.target.result), {type:"array", cellDates:true, codepage:65001});
+      if(!wb.SheetNames.length){ setMsg($("importErr"), "That workbook has no sheets."); return; }
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],
+              {header:1, defval:"", raw:false, cellDates:true, dateNF:"yyyy-mm-dd", blankrows:false});
+    }catch(err){
+      setMsg($("importErr"), "That file could not be parsed. (" + err.message + ")");
+      return;
+    }
+    if(!rows.length){ setMsg($("importErr"), "That file is empty."); return; }
+
+    var head = rows[0].map(function(h){ return cellToString(h).trim(); });
+
+    // Locate AllowSMS — everything to its right is an attribute column.
+    var anchor = -1;
+    for(var i=0;i<head.length;i++){
+      if(head[i].toLowerCase() === WATI_SCHEMA.columns.allowSMS.toLowerCase()){ anchor = i; break; }
+    }
+    if(anchor === -1){
+      setMsg($("importErr"), "No \u201c" + WATI_SCHEMA.columns.allowSMS +
+        "\u201d column found in that file, so there is no way to tell where the attributes start. " +
+        "Header row read as: " + head.join(", "));
+      return;
+    }
+    if(anchor === head.length - 1){
+      setMsg($("importErr"), "That file has no columns after " + WATI_SCHEMA.columns.allowSMS + " — nothing to import.");
+      return;
+    }
+
+    var body = rows.slice(1);
+    if(body.length === 0){
+      setMsg($("importErr"), "That file has a header row but no data rows, so no values can be read.");
+      return;
+    }
+
+    var sample = Math.min(body.length, 200);
+    var imported = [], varying = [], mapped = [];
+
+    for(var c = anchor + 1; c < head.length; c++){
+      var nm = head[c];
+      if(nm === "") continue;
+
+      // Is this column constant across the sampled rows?
+      var first = cellToString(body[0][c] === undefined ? "" : body[0][c]);
+      var constant = true;
+      for(var r=1;r<sample;r++){
+        var v = cellToString(body[r][c] === undefined ? "" : body[r][c]);
+        if(v !== first){ constant = false; break; }
+      }
+
+      if(constant){
+        imported.push({name: nm, source: "fixed", value: first, column: -1});
+      }else{
+        // Varies per contact. Map it to a same-named column in the contact
+        // list if one exists; otherwise add it empty so it is obvious.
+        var col = findColumnByName(nm);
+        if(col >= 0){
+          imported.push({name: nm, source: "column", value: "", column: col});
+          mapped.push(nm);
+        }else{
+          imported.push({name: nm, source: "fixed", value: "", column: -1});
+          varying.push(nm);
+        }
+      }
+    }
+
+    if(imported.length === 0){
+      setMsg($("importErr"), "No usable attribute columns were found after " + WATI_SCHEMA.columns.allowSMS + ".");
+      return;
+    }
+
+    state.attributes = [];
+    imported.forEach(function(it){ addAttribute(it); });
+    renderAttributes();
+
+    setMsg($("importOk"), imported.length + " attributes imported from " + file.name + ".");
+    var notes = [];
+    if(mapped.length) notes.push(mapped.join(", ") + " changed between rows and " +
+      (mapped.length === 1 ? "was" : "were") + " mapped to the matching column in your contact list.");
+    if(varying.length) notes.push(varying.join(", ") + " changed between rows with no matching column, so " +
+      (varying.length === 1 ? "it was" : "they were") + " left blank — fill " +
+      (varying.length === 1 ? "it" : "them") + " in before building.");
+    if(notes.length) setMsg($("importWarn"), notes.join(" "));
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* ---- Presets (localStorage — attribute definitions only) ------------ */
+function loadPresets(){
+  try{ return JSON.parse(localStorage.getItem(LS_PRESETS) || "{}") || {}; }
+  catch(e){ return {}; }
+}
+function savePresets(obj){
+  try{ localStorage.setItem(LS_PRESETS, JSON.stringify(obj)); }
+  catch(e){ setMsg($("attrErr"), "Could not save the set — your browser is blocking local storage."); }
+}
+function refreshPresetDropdown(selected){
+  var presets = loadPresets();
+  var sel = $("presetSelect");
+  sel.innerHTML = "";
+  var o = document.createElement("option");
+  o.value = ""; o.textContent = "— none —";
+  sel.appendChild(o);
+  Object.keys(presets).sort().forEach(function(nm){
+    var opt = document.createElement("option");
+    opt.value = nm; opt.textContent = nm;
+    sel.appendChild(opt);
+  });
+  if(selected) sel.value = selected;
+}
+
+function loadSettings(){
+  try{ return JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}") || {}; }
+  catch(e){ return {}; }
+}
+function saveSettings(){
+  try{
+    localStorage.setItem(LS_SETTINGS, JSON.stringify({
+      defaultCC: $("defaultCC").value,
+      minDigits: $("minDigits").value,
+      maxDigits: $("maxDigits").value,
+      maxMB: $("maxMB").value,
+      emailHeader: $("emailHeader").value,
+      allowHeader: WATI_SCHEMA.columns.allowCampaign
+    }));
+  }catch(e){ /* storage blocked — not fatal */ }
+}
+
+/* =====================================================================
+   7. STEP 4 — CLEANING, VALIDATION AND OUTPUT ASSEMBLY
+   ===================================================================== */
+
+/** Remove every character that is not a digit. */
+function digitsOnly(s){ return String(s).replace(/\D+/g, ""); }
+
+/**
+ * Normalise one raw phone string into { cc, national } digits.
+ * Handles: spaces, hyphens, brackets, dots, a leading "+", a leading "00",
+ * and a leading national "0". Returns null pieces if nothing usable.
+ */
+function normalisePhone(rawPhone, rawCC, defaultCC, merged){
+  var p = String(rawPhone || "").trim();
+  var hadPlus = /^\s*\+/.test(p);
+
+  // Strip international prefixes before removing punctuation
+  p = p.replace(/^\s*\+/, "");
+  p = p.replace(/^\s*00(?=\d)/, "");
+  p = digitsOnly(p);
+
+  var cc = digitsOnly(rawCC || "");
+  if(WATI_SCHEMA.countryCodeFormat.stripLeadingZeros) cc = cc.replace(/^0+/, "");
+  if(!cc) cc = digitsOnly(defaultCC).replace(/^0+/, "");
+
+  var national = p;
+
+  if(merged){
+    // The country code is expected to be baked into the number.
+    if(cc && national.indexOf(cc) === 0 && national.length > cc.length){
+      national = national.slice(cc.length);
+    }else if(hadPlus && cc && national.indexOf(cc) === 0){
+      national = national.slice(cc.length);
+    }
+    // If it does not start with the country code, treat the whole thing as
+    // the national number and prefix the country code — the conservative read.
+  }
+
+  if(WATI_SCHEMA.phoneFormat.stripLeadingZeros) national = national.replace(/^0+/, "");
+
+  return { cc: cc, national: national };
+}
+
+/** True when an email column is mapped and the user wants it in the file. */
+function emailColumnEnabled(){
+  return parseInt($("mapEmail").value,10) >= 0 && $("emailAsColumn").checked;
+}
+
+/** The header text to use for the email column, falling back to the schema. */
+function emailColumnHeaderText(){
+  var t = ($("emailHeader").value || "").trim();
+  return t || WATI_SCHEMA.emailColumnHeader;
+}
+
+/** Assemble the output headers in the exact WATI order. */
+function outputHeaders(){
+  var c = WATI_SCHEMA.columns;
+  var h = [c.name, c.countryCode, c.phone, c.allowCampaign, c.allowSMS];
+  if(emailColumnEnabled()) h.push(emailColumnHeaderText());
+  state.attributes.forEach(function(a){ h.push(a.name); });
+  return h;
+}
+
+/**
+ * Walk every uploaded row, clean it, validate it, and produce:
+ *   - rows      : valid output rows (arrays matching outputHeaders())
+ *   - rejected  : [{rowNumber, reason, original[]}] for the audit download
+ * Nothing is ever dropped silently — a row is either in rows or in rejected.
+ */
+function buildOutput(){
+  var phoneCol = parseInt($("mapPhone").value,10);
+  var ccCol    = parseInt($("mapCC").value,10);
+  var emailCol = parseInt($("mapEmail").value,10);
+  var nameCol  = parseInt($("mapName").value,10);
+  var merged   = $("ccMerged").checked;
+  var emailAsCol = emailColumnEnabled();
+  var dedupe   = $("dedupe").checked;
+  var defaultCC= $("defaultCC").value;
+  var minD     = parseInt($("minDigits").value,10) || WATI_SCHEMA.minTotalDigits;
+  var maxD     = parseInt($("maxDigits").value,10) || WATI_SCHEMA.maxTotalDigits;
+
+  var rows = [], rejected = [], seen = {}, dupCount = 0;
+
+  for(var i=0;i<state.rowsFmt.length;i++){
+    var rowNumber = i + 2; // +1 for header, +1 for 1-based spreadsheet rows
+    var original = (state.rowsFmt[i] || []).map(cellToString);
+
+    var rawPhone = cellAt(i, phoneCol, true);
+    var rawCC    = cellAt(i, ccCol, true);
+
+    if(digitsOnly(rawPhone) === ""){
+      rejected.push({rowNumber: rowNumber, reason: "Missing or non-numeric phone number", original: original});
+      continue;
+    }
+
+    var np = normalisePhone(rawPhone, rawCC, defaultCC, merged);
+
+    if(!np.cc){
+      rejected.push({rowNumber: rowNumber, reason: "No country code on the row and no default country code set", original: original});
+      continue;
+    }
+    if(!np.national){
+      rejected.push({rowNumber: rowNumber, reason: "Phone number is empty once the country code was removed", original: original});
+      continue;
+    }
+
+    var total = np.cc.length + np.national.length;
+    if(total < minD){
+      rejected.push({rowNumber: rowNumber, reason: "Too short — " + total + " digits, minimum is " + minD, original: original});
+      continue;
+    }
+    if(total > maxD){
+      rejected.push({rowNumber: rowNumber, reason: "Too long — " + total + " digits, maximum is " + maxD, original: original});
+      continue;
+    }
+
+    var key = np.cc + np.national;
+    if(seen[key] !== undefined){
+      dupCount++;
+      if(dedupe){
+        rejected.push({rowNumber: rowNumber, reason: "Duplicate of the number already used on row " + seen[key], original: original});
+        continue;
+      }
+    }else{
+      seen[key] = rowNumber;
+    }
+
+    // Email: trimmed and lowercased only — never reformatted or truncated.
+    var email = emailCol >= 0 ? cellAt(i, emailCol, false).trim().toLowerCase() : "";
+    var name  = nameCol  >= 0 ? cellAt(i, nameCol, false).trim() : "";
+
+    var out = [
+      name,
+      WATI_SCHEMA.countryCodeFormat.includePlus ? ("+" + np.cc) : np.cc,
+      np.national,
+      WATI_SCHEMA.allowCampaignValue,
+      WATI_SCHEMA.allowSMSValue
+    ];
+
+    // The email column, when enabled, sits immediately after AllowSMS.
+    if(emailAsCol) out.push(email);
+
+    // Attribute columns, in the order they appear in the builder
+    for(var a=0;a<state.attributes.length;a++){
+      var attr = state.attributes[a];
+      if(attr.source === "column"){
+        out.push(attr.column >= 0 ? cellAt(i, attr.column, false) : "");
+      }else{
+        out.push(attr.value);
+      }
+    }
+
+    // Keep the email alongside the row for the rejected-report only.
+    rows.push(out);
+  }
+
+  return {
+    headers: outputHeaders(),
+    rows: rows,
+    rejected: rejected,
+    duplicatesFound: dupCount,
+    duplicatesRemoved: dedupe ? dupCount : 0,
+    totalRead: state.rowsFmt.length
+  };
+}
+
+/* =====================================================================
+   8. STEP 5 — SERIALISATION AND BYTE-ACCURATE SPLITTING
+   ---------------------------------------------------------------------
+   Sizes are NEVER estimated from row counts. Every candidate part is
+   actually serialised and measured with Blob.size, which counts real
+   UTF-8 bytes exactly as they will be written to disk.
+   ===================================================================== */
+
+var textEncoder = (typeof TextEncoder !== "undefined") ? new TextEncoder() : null;
+
+/** Byte length of a string, used only to seed the search — never to decide. */
+function approxBytes(s){
+  if(textEncoder) return textEncoder.encode(s).length;
+  return new Blob([s]).size;
+}
+
+/** Serialise one part into its final text, exactly as it will be saved. */
+function serializePart(headerLine, lines, start, count){
+  var LE = WATI_SCHEMA.lineEnding;
+  var body = headerLine;
+  if(count > 0) body += LE + lines.slice(start, start + count).join(LE);
+  if(WATI_SCHEMA.trailingNewline) body += LE;
+  return WATI_SCHEMA.writeBOM ? ("\uFEFF" + body) : body;
+}
+
+/** The authoritative size measurement: the real Blob that gets downloaded. */
+function makePartBlob(headerLine, lines, start, count){
+  return new Blob([serializePart(headerLine, lines, start, count)],
+                  {type: "text/csv;charset=utf-8"});
+}
+
+/**
+ * Split the rows into parts, none of which exceeds maxBytes.
+ * Strategy: estimate a boundary from cumulative byte lengths, then walk the
+ * boundary up or down while measuring the actual Blob until it is as large
+ * as possible without going over.
+ * Returns {parts:[...]} or {error:"..."}.
+ */
+function splitIntoParts(headers, rows, maxBytes){
+  var headerLine = csvLine(headers);
+  var LE = WATI_SCHEMA.lineEnding;
+
+  // Pre-serialise each data row once.
+  var lines = new Array(rows.length);
+  var lineBytes = new Array(rows.length);
+  for(var i=0;i<rows.length;i++){
+    lines[i] = csvLine(rows[i]);
+    lineBytes[i] = approxBytes(lines[i]);
+  }
+
+  var headerBytes = approxBytes(headerLine) + (WATI_SCHEMA.writeBOM ? 3 : 0) +
+                    (WATI_SCHEMA.trailingNewline ? approxBytes(LE) : 0);
+  var sepBytes = approxBytes(LE);
+
+  // A file with a header and zero rows must at least fit.
+  if(headerBytes > maxBytes){
+    return {error: "The header row alone is " + fmtBytes(headerBytes) +
+      ", which is over the limit of " + fmtBytes(maxBytes) +
+      ". Raise the max file size or remove some attribute columns."};
+  }
+
+  var parts = [];
+  var start = 0;
+  var guard = 0;
+
+  while(start < rows.length){
+    if(++guard > 100000) return {error: "Splitting stopped after 100,000 parts — something is wrong with the input."};
+
+    var remaining = rows.length - start;
+
+    // --- 1. Estimate a boundary from cumulative byte lengths ---------
+    var budget = maxBytes - headerBytes;
+    var used = 0, n = 0;
+    while(n < remaining && used + sepBytes + lineBytes[start + n] <= budget){
+      used += sepBytes + lineBytes[start + n];
+      n++;
+    }
+    if(n === 0) n = 1; // always try at least one row so the check below can fire
+
+    // --- 2. Measure the real serialised bytes and walk the boundary ---
+    var size = makePartBlob(headerLine, lines, start, n).size;
+
+    // Too big: walk down until it fits.
+    while(size > maxBytes && n > 1){
+      n--;
+      size = makePartBlob(headerLine, lines, start, n).size;
+    }
+
+    // A single row that still will not fit is a hard error, not a bad file.
+    if(size > maxBytes && n === 1){
+      return {error: "Row " + (start + 2) + " on its own serialises to " + fmtBytes(size) +
+        ", which is larger than the " + fmtBytes(maxBytes) + " limit. " +
+        "Shorten that row's attribute values, or raise the max file size."};
+    }
+
+    // Too small: walk up while the next row still fits, to fill each part.
+    while(n < remaining){
+      var bigger = makePartBlob(headerLine, lines, start, n + 1).size;
+      if(bigger > maxBytes) break;
+      n++; size = bigger;
+    }
+
+    var blob = makePartBlob(headerLine, lines, start, n);
+    parts.push({
+      index: parts.length + 1,
+      startRow: start + 1,      // 1-based within the valid output rows
+      endRow: start + n,
+      rowCount: n,
+      bytes: blob.size,
+      blob: blob
+    });
+    start += n;
+  }
+
+  // Empty result: still emit one header-only file so the run is never silent.
+  if(parts.length === 0){
+    var b = makePartBlob(headerLine, lines, 0, 0);
+    parts.push({index:1, startRow:0, endRow:0, rowCount:0, bytes:b.size, blob:b});
+  }
+
+  return {parts: parts};
+}
+
+/** Build the final filename for a part. */
+function partFilename(prefix, index, total){
+  var pad = function(n){ return String(n).padStart(2, "0"); };
+  var clean = (prefix || "broadcast").replace(/[^a-zA-Z0-9._-]+/g, "_") || "broadcast";
+  return clean + "_part_" + pad(index) + "_of_" + pad(total) + "." + WATI_SCHEMA.fileExtension;
+}
+
+/* =====================================================================
+   9. RENDERING THE RESULTS
+   ===================================================================== */
+
+/**
+ * Update the readouts pinned to the top of the page. Purely cosmetic —
+ * it mirrors numbers that are already shown in the step 4 stats grid.
+ */
+function updateInstruments(built, parts, totalBytes){
+  $("instRows").textContent  = built ? fmtNum(built.totalRead) : "----";
+  $("instValid").textContent = built ? fmtNum(built.rows.length) : "----";
+  $("instRej").textContent   = built ? fmtNum(built.rejected.length) : "----";
+  $("instParts").textContent = parts ? fmtNum(parts.length) : "--";
+  $("instSize").textContent  = totalBytes ? (totalBytes/(1024*1024)).toFixed(2) : "0.00";
+  var rej = $("instRej").parentNode;
+  if(built && built.rejected.length) rej.classList.add("alarm"); else rej.classList.remove("alarm");
+}
+
+function renderStats(built, parts, totalBytes){
+  var invalid = built.rejected.length;
+  var el = $("stats");
+  var items = [
+    {k:"Rows read",        v: fmtNum(built.totalRead)},
+    {k:"Valid rows",       v: fmtNum(built.rows.length), cls: built.rows.length ? "good" : "bad"},
+    {k:"Rejected rows",    v: fmtNum(invalid), cls: invalid ? "bad" : ""},
+    {k:"Duplicates removed", v: fmtNum(built.duplicatesRemoved)},
+    {k:"Attribute columns", v: fmtNum(state.attributes.length)},
+    {k:"Output size",      v: (totalBytes/(1024*1024)).toFixed(2) + " MB"},
+    {k:"Files to generate", v: fmtNum(parts.length)}
+  ];
+  el.innerHTML = "";
+  updateInstruments(built, parts, totalBytes);
+  items.forEach(function(it){
+    var d = document.createElement("div");
+    d.className = "stat" + (it.cls ? " " + it.cls : "");
+    var v = document.createElement("div"); v.className = "v"; v.textContent = it.v;
+    var k = document.createElement("div"); k.className = "k"; k.textContent = it.k;
+    d.appendChild(v); d.appendChild(k);
+    el.appendChild(d);
+  });
+}
+
+function renderPreview(built){
+  var thead = $("previewTable").querySelector("thead");
+  var tbody = $("previewTable").querySelector("tbody");
+  thead.innerHTML = ""; tbody.innerHTML = "";
+
+  var trh = document.createElement("tr");
+  built.headers.forEach(function(h, i){
+    var th = document.createElement("th");
+    th.textContent = h;
+    if(i >= 5) th.className = "attrcol";
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+
+  built.rows.slice(0, PREVIEW_ROWS).forEach(function(r){
+    var tr = document.createElement("tr");
+    r.forEach(function(cell, i){
+      var td = document.createElement("td");
+      td.textContent = cell;
+      if(i >= 5) td.className = "attrcol";
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  $("previewTotal").textContent = fmtNum(built.rows.length);
+}
+
+function renderParts(parts, maxBytes){
+  var host = $("partList");
+  host.innerHTML = "";
+  var prefix = $("prefix").value;
+
+  parts.forEach(function(p){
+    var name = partFilename(prefix, p.index, parts.length);
+    var wrap = document.createElement("div");
+    wrap.className = "part";
+
+    var left = document.createElement("div");
+    var nm = document.createElement("div"); nm.className = "name"; nm.textContent = name;
+    var meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = "Rows " + fmtNum(p.startRow) + "–" + fmtNum(p.endRow) +
+                       " · " + fmtNum(p.rowCount) + " contacts · " + fmtBytes(p.bytes);
+    var bar = document.createElement("div"); bar.className = "bar";
+    var fill = document.createElement("i");
+    fill.style.width = Math.min(100, (p.bytes / maxBytes) * 100).toFixed(1) + "%";
+    bar.appendChild(fill);
+    left.appendChild(nm); left.appendChild(meta); left.appendChild(bar);
+
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "primary";
+    btn.textContent = "Download part " + p.index;
+    btn.addEventListener("click", function(){ downloadBlob(p.blob, name); });
+
+    wrap.appendChild(left); wrap.appendChild(btn);
+    host.appendChild(wrap);
+  });
+}
+
+/* =====================================================================
+   10. THE MAIN BUILD ACTION
+   ===================================================================== */
+function runBuild(){
+  setMsg($("mapErr"), ""); setMsg($("attrErr"), "");
+  setMsg($("buildErr"), ""); setMsg($("buildWarn"), ""); setMsg($("buildOk"), "");
+  setMsg($("splitErr"), "");
+
+  // --- Validate the mapping ---------------------------------------
+  if(parseInt($("mapPhone").value,10) < 0){
+    setMsg($("mapErr"), "Choose which column holds the phone number before building.");
+    $("sec2").scrollIntoView({behavior:"smooth", block:"start"});
+    return;
+  }
+  if(parseInt($("mapCC").value,10) < 0 && digitsOnly($("defaultCC").value) === ""){
+    setMsg($("mapErr"), "There is no country code column selected, so a default country code is required. Enter one, for example 91.");
+    $("sec2").scrollIntoView({behavior:"smooth", block:"start"});
+    return;
+  }
+  var minD = parseInt($("minDigits").value,10), maxD = parseInt($("maxDigits").value,10);
+  if(!(minD > 0) || !(maxD > 0) || minD > maxD){
+    setMsg($("mapErr"), "The digit range is not valid. The minimum must be at least 1 and no larger than the maximum.");
+    return;
+  }
+
+  // --- Validate the attributes ------------------------------------
+  var names = {}, problem = null;
+  for(var i=0;i<state.attributes.length;i++){
+    var a = state.attributes[i];
+    var nm = (a.name || "").trim();
+    if(!nm){ problem = "Attribute " + (i+1) + " has no name. Give it the exact name used in your WATI template, or remove it."; break; }
+    if(names[nm]){ problem = "Two attributes are both called “" + nm + "”. WATI needs each column name to be unique."; break; }
+    names[nm] = true;
+    var reserved = [WATI_SCHEMA.columns.name, WATI_SCHEMA.columns.countryCode,
+                    WATI_SCHEMA.columns.phone, WATI_SCHEMA.columns.allowCampaign,
+                    WATI_SCHEMA.columns.allowSMS];
+    if(emailColumnEnabled() && nm === emailColumnHeaderText()){
+      problem = "An attribute is called \u201c" + nm + "\u201d, which is already the email " +
+                "column's header. Rename one of them, or untick the email column in step 2.";
+      break;
+    }
+    if(reserved.indexOf(nm) !== -1){ problem = "“" + nm + "” is one of WATI's built-in columns. Pick a different attribute name."; break; }
+    if(a.source === "column" && a.column < 0){ problem = "Attribute “" + nm + "” is set to map from a column but no column is chosen."; break; }
+    a.name = nm;
+  }
+  if(problem){
+    setMsg($("attrErr"), problem);
+    $("sec3").scrollIntoView({behavior:"smooth", block:"start"});
+    return;
+  }
+
+  // --- Build ------------------------------------------------------
+  var built;
+  try{
+    built = buildOutput();
+  }catch(err){
+    setMsg($("buildErr"), "Something went wrong while building the rows: " + err.message);
+    show($("sec4"));
+    return;
+  }
+  state.built = built;
+
+  show($("sec4")); show($("sec5"));
+  renderPreview(built);
+  saveSettings();
+
+  if(built.rows.length === 0){
+    renderStats(built, [], 0);
+    setMsg($("buildErr"), "No rows survived cleaning — all " + fmtNum(built.totalRead) +
+      " rows were rejected. Check that the phone column is mapped to the right column, " +
+      "then use “Download rejected rows” to see the reason for each one.");
+    $("partList").innerHTML = "";
+    $("sec4").scrollIntoView({behavior:"smooth", block:"start"});
+    return;
+  }
+
+  if(built.rejected.length){
+    setMsg($("buildWarn"), fmtNum(built.rejected.length) + " of " + fmtNum(built.totalRead) +
+      " rows were left out. Nothing was discarded silently — download the rejected rows to see why.");
+  }
+
+  runSplit();
+  $("sec4").scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+/** Split (or re-split) the already-built rows using the current settings. */
+function runSplit(){
+  setMsg($("splitErr"), "");
+  if(!state.built || state.built.rows.length === 0) return;
+
+  var mb = parseFloat($("maxMB").value);
+  if(!(mb > 0)){
+    setMsg($("splitErr"), "Max file size must be a positive number of megabytes.");
+    return;
+  }
+  MAX_FILE_BYTES = Math.floor(mb * 1024 * 1024);
+  if(mb > 2){
+    setMsg($("splitErr"), "Heads up: WATI rejects imports over 2 MB. Anything above 2 here will probably fail on upload.");
+  }
+
+  var res = splitIntoParts(state.built.headers, state.built.rows, MAX_FILE_BYTES);
+  if(res.error){
+    state.parts = [];
+    $("partList").innerHTML = "";
+    setMsg($("splitErr"), res.error);
+    renderStats(state.built, [], 0);
+    return;
+  }
+
+  state.parts = res.parts;
+  var totalBytes = res.parts.reduce(function(s,p){ return s + p.bytes; }, 0);
+  renderStats(state.built, res.parts, totalBytes);
+  renderParts(res.parts, MAX_FILE_BYTES);
+  saveSettings();
+
+  setMsg($("buildOk"), fmtNum(state.built.rows.length) + " contacts ready across " +
+    res.parts.length + (res.parts.length === 1 ? " file." : " files. Import them into WATI one at a time."));
+}
+
+/* =====================================================================
+   11. REJECTED-ROW EXPORT
+   ===================================================================== */
+function downloadRejected(){
+  if(!state.built){ return; }
+  if(state.built.rejected.length === 0){
+    setMsg($("buildWarn"), "There are no rejected rows — every row in the file was used.");
+    return;
+  }
+  var header = ["Source row"].concat(state.headers).concat(["Reason rejected"]);
+  var lines = [csvLine(header)];
+  state.built.rejected.forEach(function(r){
+    var row = [r.rowNumber];
+    for(var c=0;c<state.headers.length;c++) row.push(r.original[c] === undefined ? "" : r.original[c]);
+    row.push(r.reason);
+    lines.push(csvLine(row));
+  });
+  var text = lines.join(WATI_SCHEMA.lineEnding);
+  // A BOM is added here (and ONLY here) so Excel opens the audit file with
+  // correct accents. This file is for you, not for WATI.
+  var blob = new Blob(["\uFEFF" + text], {type:"text/csv;charset=utf-8"});
+  downloadBlob(blob, derivePrefix($("prefix").value || "broadcast") + "_rejected_rows.csv");
+}
+
+/* =====================================================================
+   12. ZIP DOWNLOAD
+   ===================================================================== */
+function downloadZip(){
+  if(typeof JSZip === "undefined"){
+    setMsg($("splitErr"), "JSZip did not load, so the ZIP option is unavailable. Use the individual download buttons instead.");
+    return;
+  }
+  if(!state.parts.length){
+    setMsg($("splitErr"), "There is nothing to zip yet — build the broadcast file first.");
+    return;
+  }
+  var zip = new JSZip();
+  var prefix = $("prefix").value;
+  state.parts.forEach(function(p){
+    zip.file(partFilename(prefix, p.index, state.parts.length), p.blob);
+  });
+  var btn = $("dlZip");
+  var original = btn.textContent;
+  btn.disabled = true; btn.textContent = "Preparing ZIP…";
+  zip.generateAsync({type:"blob", compression:"DEFLATE"}).then(function(blob){
+    downloadBlob(blob, (derivePrefix(prefix) || "broadcast") + "_wati_parts.zip");
+    btn.disabled = false; btn.textContent = original;
+  }).catch(function(err){
+    btn.disabled = false; btn.textContent = original;
+    setMsg($("splitErr"), "The ZIP could not be created: " + err.message +
+      " — use the individual download buttons instead.");
+  });
+}
+
+/* =====================================================================
+   13. WIRING UP THE PAGE
+   ===================================================================== */
+(function init(){
+
+  // --- Upload: click, keyboard and drag-and-drop -------------------
+  var drop = $("drop"), fileInput = $("fileInput");
+  drop.addEventListener("click", function(){ fileInput.click(); });
+  drop.addEventListener("keydown", function(e){
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener("change", function(){
+    if(fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+    fileInput.value = ""; // allow re-selecting the same file
+  });
+  ["dragenter","dragover"].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); drop.classList.add("over"); });
+  });
+  ["dragleave","drop"].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); drop.classList.remove("over"); });
+  });
+  drop.addEventListener("drop", function(e){
+    var dt = e.dataTransfer;
+    if(dt && dt.files && dt.files[0]) handleFile(dt.files[0]);
+  });
+  // Stop the browser from navigating away if a file is dropped elsewhere
+  window.addEventListener("dragover", function(e){ e.preventDefault(); });
+  window.addEventListener("drop", function(e){ e.preventDefault(); });
+
+  // --- Mapping: keep the merged-country-code hint sensible ---------
+  $("mapCC").addEventListener("change", function(){
+    if(parseInt($("mapCC").value,10) >= 0) $("ccMerged").checked = false;
+  });
+
+  // --- Attributes --------------------------------------------------
+  $("addAttr").addEventListener("click", function(){ addAttribute(); });
+  $("clearAttr").addEventListener("click", function(){
+    state.attributes = []; renderAttributes();
+    setMsg($("bulkOk"), ""); setMsg($("bulkErr"), "");
+    setMsg($("importOk"), ""); setMsg($("importWarn"), ""); setMsg($("importErr"), "");
+  });
+  $("bulkAdd").addEventListener("click", function(){ applyBulk(false); });
+  $("bulkReplace").addEventListener("click", function(){ applyBulk(true); });
+  $("attrFileInput").addEventListener("change", function(){
+    var f = $("attrFileInput").files && $("attrFileInput").files[0];
+    importAttributesFromFile(f);
+    $("attrFileInput").value = "";
+  });
+  $("buildBtn").addEventListener("click", runBuild);
+
+  // --- Presets -----------------------------------------------------
+  refreshPresetDropdown();
+  $("presetSelect").addEventListener("change", function(){
+    var nm = $("presetSelect").value;
+    if(!nm) return;
+    var presets = loadPresets();
+    var def = presets[nm];
+    if(!def){ return; }
+    state.attributes = [];
+    def.forEach(function(a){
+      addAttribute({
+        name: a.name,
+        source: a.source,
+        value: a.value,
+        // A saved column index only makes sense if the new file has that column
+        column: (typeof a.column === "number" && a.column < state.headers.length) ? a.column : -1
+      });
+    });
+    if(state.attributes.length === 0) renderAttributes();
+    $("presetName").value = nm;
+    setMsg($("attrErr"), "");
+  });
+  $("presetSave").addEventListener("click", function(){
+    var nm = ($("presetName").value || "").trim();
+    if(!nm){ setMsg($("attrErr"), "Give the set a name before saving it."); return; }
+    var presets = loadPresets();
+    presets[nm] = state.attributes.map(function(a){
+      return {name:a.name, source:a.source, value:a.value, column:a.column};
+    });
+    savePresets(presets);
+    refreshPresetDropdown(nm);
+    setMsg($("attrErr"), "");
+  });
+  $("presetDelete").addEventListener("click", function(){
+    var nm = $("presetSelect").value || ($("presetName").value || "").trim();
+    if(!nm){ setMsg($("attrErr"), "Choose a saved set to delete."); return; }
+    var presets = loadPresets();
+    if(presets[nm] === undefined){ setMsg($("attrErr"), "There is no saved set called “" + nm + "”."); return; }
+    delete presets[nm];
+    savePresets(presets);
+    refreshPresetDropdown();
+    $("presetName").value = "";
+    setMsg($("attrErr"), "");
+  });
+
+  // --- Preview / download actions ----------------------------------
+  $("dlInvalid").addEventListener("click", downloadRejected);
+  $("dlZip").addEventListener("click", downloadZip);
+  $("maxMB").addEventListener("change", runSplit);
+  $("prefix").addEventListener("input", function(){
+    if(state.parts.length) renderParts(state.parts, MAX_FILE_BYTES);
+  });
+
+  // --- Restore remembered UI settings ------------------------------
+  var s = loadSettings();
+  if(s.defaultCC) $("defaultCC").value = s.defaultCC;
+  if(s.maxMB) $("maxMB").value = s.maxMB;
+  if(s.minDigits) $("minDigits").value = s.minDigits;
+  if(s.maxDigits) $("maxDigits").value = s.maxDigits;
+  if(s.emailHeader) $("emailHeader").value = s.emailHeader;
+  if(typeof s.allowHeader === "string" && s.allowHeader &&
+     WATI_SCHEMA.allowCampaignVariants.indexOf(s.allowHeader) !== -1){
+    WATI_SCHEMA.columns.allowCampaign = s.allowHeader;
+  }
+
+  // --- The AllowCampaign / AllowBroadcast switch --------------------
+  // The sample file says AllowCampaign; some WATI exports say AllowBroadcast.
+  // Rather than guess silently, offer both.
+  var host = $("sec2");
+  var box = document.createElement("div");
+  box.className = "field";
+  box.style.marginTop = "18px";
+  var lbl = document.createElement("label");
+  lbl.className = "fl"; lbl.htmlFor = "allowHeader";
+  lbl.textContent = "Consent column header";
+  var sel = document.createElement("select");
+  sel.id = "allowHeader";
+  WATI_SCHEMA.allowCampaignVariants.forEach(function(v){
+    var o = document.createElement("option");
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  });
+  sel.value = WATI_SCHEMA.columns.allowCampaign;
+  sel.addEventListener("change", function(){
+    WATI_SCHEMA.columns.allowCampaign = sel.value;
+    saveSettings();
+    if(state.built) runBuild();
+  });
+  var hint = document.createElement("p");
+  hint.className = "hint";
+  hint.textContent = "Your live campaign files use AllowBroadcast. The blank WATI template ships as AllowCampaign — switch here if your account needs that instead.";
+  box.appendChild(lbl); box.appendChild(sel); box.appendChild(hint);
+  host.insertBefore(box, $("mapErr"));
+
+  // --- Library check on load ---------------------------------------
+  librariesReady();
+})();
+</script>
+</body>
+</html>
